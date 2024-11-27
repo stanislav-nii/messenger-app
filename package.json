@@ -1,0 +1,48 @@
+{
+  "name": "messenger",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "22.3.9",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "ia32"
+          ]
+        }
+      ],
+      "publish": {
+        "provider": "github",
+        "owner": "stanislav-nii",
+        "repo": "messenger-updater"
+      }
+    },
+    "extraFiles": [
+      {
+        "from": "img",
+        "to": "resources",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-context-menu": "^3.6.1",
+    "electron-dl": "^3.5.1",
+    "electron-log": "^5.2.3",
+    "electron-updater": "^6.3.9",
+    "node-key-sender": "^1.0.11"
+  }
+}
