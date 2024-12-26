@@ -5,6 +5,7 @@ const {
   Tray,
   Notification,
   net,
+  pushNotifications,
 } = require("electron");
 
 const { autoUpdater } = require('electron-updater');
@@ -17,7 +18,8 @@ const URL = "http://192.168.1.19:8000/"
 
 app.setAppUserModelId("Messenger");
 
-log.transports.file.resolvePath = () => path.join("C:/Users/User/Desktop/logs", 'main.log');
+log.transports.file.resolvePath = () => path.join(process.env.APPDATA, 'messenger/log/main.log');
+log.log("Application version" + app.getVersion());
 
 var mainWindow;
 
@@ -27,16 +29,6 @@ contextMenu({
   showInspectElement: true,
   showSearchWithGoogle: false,
 });
-
-
-// mainWindow.mousedown(event => {
-//   if( event.which == 3) {
-//     console.log("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-//    //this is a right click, so electron-context-menu will be appearing momentarily... 
-//   //  let textBoxClicked = $(event.target).closest('.MY-TEXTBOX') 
-//   //  if(textBoxClicked.length) ipcRenderer.send('right-click/' + $(textBoxClicked).attr('id') ) 
-//   }
-// })
 
 async function notifyIfChannel(messageJSON, mainWindow){
   try {
@@ -80,24 +72,24 @@ async function notifyIfChannel(messageJSON, mainWindow){
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1000,
+    width: 1050,
     height: 700,
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: true,
     }
   });
   mainWindow.loadURL(URL);
 
-  autoUpdater.setFeedURL("https://github.com/cyrilgupta/electron-autoupdater/");
+  mainWindow.webContents.on("did-fail-load", (ev) => {
+    console.log('did-fail-load');
+    mainWindow.reload();
+  });
 
-  mainWindow.webContents.executeJavaScript(`alert("hui");`);
-  //mainWindow.webContents.executeJavaScript(`alert(${(autoUpdater)});`);
-  mainWindow.webContents.executeJavaScript(`console.log(${autoUpdater});`);
-  autoUpdater.checkForUpdatesAndNotify();
+  //autoUpdater.setFeedURL("");
 
-  // mainWindow.webContents.on("did-navigate", (ev, url) => {
-  //   console.log(url);
-  // });
+  //autoUpdater.checkForUpdatesAndNotify();
+
 
   mainWindow.webContents.setWindowOpenHandler(
     ({ url, referrer, postBody, features, frameName }) => {
@@ -132,6 +124,11 @@ async function createWindow() {
 
   _debugger.attach();
   _debugger.on("message", async (_event, method, params) => {
+    if(method === "Network.webSocketFrameError"){
+      console.log(method);
+      mainWindow.reload();
+    }
+
     if (method === "Network.webSocketFrameReceived") {
       const messageJSON = JSON.parse(
         decodeURIComponent(params?.response?.payloadData)
@@ -319,8 +316,11 @@ if (!gotTheLock) {
   });
   app.whenReady().then(() => {
     createWindow();
-    autoUpdater.checkForUpdatesAndNotify();
     createTray();
+    autoUpdater.checkForUpdates();
+    setInterval(() => {
+      autoUpdater.checkForUpdates();
+    }, 1000 * 60 * 10);
   });
 }
 
@@ -338,6 +338,12 @@ autoUpdater.on("download-progress", ()=>{
 
 autoUpdater.on("update-downloaded", ()=>{
   log.info("update-downloaded");
+  autoUpdater.quitAndInstall(true, true);
+})
+
+autoUpdater.on("download-progress", (progressTrack)=>{
+  log.info("\n\ndownload-progress");
+  log.info(progressTrack);
 });
 
 app.on("activate", () => {
