@@ -14,7 +14,7 @@ const log = require('electron-log');
 const path = require("node:path");
 const contextMenu = require("electron-context-menu");
 const { download } = require("electron-dl");
-const URL = "http://192.168.1.19:8000/"
+const URL = "http://192.168.0.2:8000/"
 
 app.setAppUserModelId("Messenger");
 
@@ -85,11 +85,6 @@ async function createWindow() {
     console.log('did-fail-load');
     mainWindow.reload();
   });
-
-  //autoUpdater.setFeedURL("");
-
-  //autoUpdater.checkForUpdatesAndNotify();
-
 
   mainWindow.webContents.setWindowOpenHandler(
     ({ url, referrer, postBody, features, frameName }) => {
