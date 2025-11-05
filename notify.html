@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      /* Светлая тема */
+      --light-accent: #79a6fc;
+      --light-bg: #f7fcff;
+      --light-bg-acrylic: rgba(247, 252, 255, 0.92);
+      --light-text-primary: #1e282e;
+      --light-text-secondary: #4a6472;
+      --light-message-bg: rgba(121, 166, 252, 0.08);
+      --light-message-text: #2c3c44;
+      --light-border: rgba(122, 166, 252, 0.15);
+      --light-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+      --light-progress-bg: rgba(122, 166, 252, 0.2);
+      --light-sender-color: #597789;
+
+      /* Тёмная тема */
+      --dark-accent: #a3dbfb;
+      --dark-bg: #0f1417;
+      --dark-bg-acrylic: rgba(15, 20, 23, 0.92);
+      --dark-text-primary: #e6f5fe;
+      --dark-text-secondary: #94c7e4;
+      --dark-message-bg: rgba(163, 219, 251, 0.1);
+      --dark-message-text: #def2fe;
+      --dark-border: rgba(163, 219, 251, 0.15);
+      --dark-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      --dark-progress-bg: rgba(163, 219, 251, 0.2);
+      --dark-sender-color: #b4e2fc;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 340px;
+      height: auto;
+      min-height: 120px;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: var(--light-shadow);
+      animation: slideIn 0.4s cubic-bezier(.16, 1, .3, 1);
+      cursor: pointer;
+      border: 1px solid var(--light-border);
+      transition: transform .25s ease, box-shadow .3s ease;
+      background: var(--light-bg-acrylic);
+      color: var(--light-text-primary);
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.dark-theme {
+      background: var(--dark-bg-acrylic);
+      color: var(--dark-text-primary);
+      box-shadow: var(--dark-shadow);
+      border: 1px solid var(--dark-border);
+    }
+
+    /* Верхняя часть с отправителем */
+    .header {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px 10px;
+      gap: 10px;
+      border-bottom: 1px solid var(--light-border);
+    }
+
+    .dark-theme .header {
+      border-bottom-color: var(--dark-border);
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--light-accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    .avatar::before {
+      display: none;
+    }
+
+    .dark-theme .avatar {
+      background: var(--dark-accent);
+      color: var(--dark-bg);
+    }
+
+    .sender-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sender-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--light-text-primary);
+      margin-bottom: 2px;
+    }
+
+    .dark-theme .sender-name {
+      color: var(--dark-text-primary);
+    }
+
+    .app-name {
+      font-size: 12px;
+      color: var(--light-sender-color);
+    }
+
+    .dark-theme .app-name {
+      color: var(--dark-sender-color);
+    }
+
+    .time {
+      font-size: 11px;
+      color: var(--light-text-secondary);
+      white-space: nowrap;
+    }
+
+    .dark-theme .time {
+      color: var(--dark-text-secondary);
+    }
+
+    /* Область сообщения */
+    .message-container {
+      padding: 14px 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .message-content {
+      background: var(--light-message-bg);
+      border-radius: 12px;
+      padding: 12px 14px;
+      border-left: 3px solid var(--light-accent);
+      line-height: 1.4;
+    }
+
+    .dark-theme .message-content {
+      background: var(--dark-message-bg);
+      border-left-color: var(--dark-accent);
+    }
+
+    .message-text {
+      font-size: 14px;
+      color: var(--light-message-text);
+      word-wrap: break-word;
+    }
+
+    .dark-theme .message-text {
+      color: var(--dark-message-text);
+    }
+
+    /* Нижняя часть с действиями */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px 14px;
+      border-top: 1px solid var(--light-border);
+    }
+
+    .dark-theme .footer {
+      border-top-color: var(--dark-border);
+    }
+
+    .quick-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .action-btn {
+      background: rgba(121, 166, 252, 0.1);
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--light-accent);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .dark-theme .action-btn {
+      background: rgba(163, 219, 251, 0.15);
+      color: var(--dark-accent);
+    }
+
+    .action-btn:hover {
+      background: rgba(121, 166, 252, 0.2);
+    }
+
+    .dark-theme .action-btn:hover {
+      background: rgba(163, 219, 251, 0.25);
+    }
+
+    /* Кнопка закрытия */
+    .close-btn {
+      background: rgba(255, 255, 255, 0.7);
+      width: 24px;
+      height: 24px;
+      font-size: 14px;
+      border-radius: 50%;
+      border: none;
+      color: #222;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background .2s;
+    }
+
+    .dark-theme .close-btn {
+      background: rgba(15, 20, 23, 0.7);
+      color: #e6f5fe;
+    }
+
+    .close-btn:hover {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .dark-theme .close-btn:hover {
+      background: rgba(15, 20, 23, 0.9);
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      width: 100%;
+      height: 3px;
+      background: var(--light-progress-bg);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .dark-theme .progress-bar {
+      background: var(--dark-progress-bg);
+    }
+
+    .progress {
+      width: 100%;
+      height: 100%;
+      background: var(--light-accent);
+      transform-origin: left;
+      transition: transform 0.1s linear;
+    }
+
+    .dark-theme .progress {
+      background: var(--dark-accent);
+    }
+
+    /* Animations */
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateX(50px) translateY(20px) scale(.96);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0) translateY(0) scale(1);
+      }
+    }
+
+    @keyframes slideOut {
+      to {
+        opacity: 0;
+        transform: translateX(50px) scale(.96);
+      }
+    }
+
+    body.fade-out {
+      animation: slideOut .35s cubic-bezier(.16, 1, .3, 1) forwards;
+    }
+
+    body:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    }
+
+    .dark-theme:hover {
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="header">
+    <div class="avatar" id="avatar">М</div>
+    <div class="sender-info">
+      <div class="sender-name" id="sender-name">Messenger</div>
+    </div>
+    <button class="close-btn" onclick="closeNotification()">×</button>
+  </div>
+
+  <div class="message-container">
+    <div class="message-content">
+      <div class="message-text" id="message-text">Привет! Как твои дела? Посмотри это новое видео, о котором я тебе
+        рассказывала</div>
+    </div>
+  </div>
+
+  <div class="progress-bar">
+    <div class="progress" id="progress"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    let currentId = null;
+    let closeTimeout = null;
+    let progressInterval = null;
+    let isDarkTheme = false;
+
+    // Функция для получения инициалов из имени
+    function getInitials(name) {
+      return name.split(' ').map(word => word[0]).join('').toUpperCase();
+    }
+
+    // Функция для форматирования времени
+    function formatTime(timestamp) {
+      const now = new Date();
+      const messageTime = new Date(timestamp);
+      const diffMs = now - messageTime;
+      const diffMins = Math.floor(diffMs / 60000);
+
+      if (diffMins < 1) return 'только что';
+      if (diffMins < 60) return `${diffMins} мин назад`;
+
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours} ч назад`;
+
+      return messageTime.toLocaleDateString();
+    }
+
+    // Функция для запуска анимации прогресс-бара
+    function startProgressAnimation(duration) {
+
+      const progress = document.getElementById('progress');
+      const startTime = Date.now();
+
+      // Сбрасываем предыдущую анимацию
+      progress.style.transform = 'scaleX(1)';
+
+      function updateProgress() {
+        const elapsed = Date.now() - startTime;
+        const progressValue = Math.max(0, 1 - (elapsed / (duration - 500)));
+
+        progress.style.transform = `scaleX(${progressValue})`;
+
+        if (elapsed >= (duration - 500)) {
+          clearInterval(progressInterval);
+        }
+      }
+
+      // Очищаем предыдущий интервал
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+
+      // Обновляем прогресс каждые 16ms (~60fps)
+      progressInterval = setInterval(updateProgress, 16);
+      updateProgress(); // Начальное обновление
+    }
+
+    function getAvatarSVG(chatType) {
+      if (chatType === 'channel') {
+        // SVG с тремя человечками для канала
+        return `
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Левый человек -->
+  <path d="M11 13C9.34 13 8 14.34 8 16C8 17.66 9.34 19 11 19C12.66 19 14 17.66 14 16C14 14.34 12.66 13 11 13ZM11 21C8.24 21 6 23.24 6 26C6 26.55 6.45 27 7 27H15C15.55 27 16 26.55 16 26C16 23.24 13.76 21 11 21Z" fill="white"/>
+  
+  <!-- Центральный человек -->
+  <path d="M18 10C15.79 10 14 11.79 14 14C14 16.21 15.79 18 18 18C20.21 18 22 16.21 22 14C22 11.79 20.21 10 18 10ZM18 20C14.13 20 11 23.13 11 27C11 27.55 11.45 28 12 28H24C24.55 28 25 27.55 25 27C25 23.13 21.87 20 18 20Z" fill="white"/>
+
+  <!-- Правый человек -->
+  <path d="M25 13C23.34 13 22 14.34 22 16C22 17.66 23.34 19 25 19C26.66 19 28 17.66 28 16C28 14.34 26.66 13 25 13ZM25 21C22.24 21 20 23.24 20 26C20 26.55 20.45 27 21 27H29C29.55 27 30 26.55 30 26C30 23.24 27.76 21 25 21Z" fill="white"/>
+</svg>
+
+    `;
+      } else {
+        // SVG с одним человечком для личных сообщений
+        return `
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 10C15.79 10 14 11.79 14 14C14 16.21 15.79 18 18 18C20.21 18 22 16.21 22 14C22 11.79 20.21 10 18 10ZM18 20C14.13 20 11 23.13 11 27C11 27.55 11.45 28 12 28H24C24.55 28 25 27.55 25 27C25 23.13 21.87 20 18 20Z" fill="white"/>
+      </svg>
+    `;
+      }
+    }
+
+    ipcRenderer.on('notify-data', (event, data) => {
+      currentId = data.id;
+
+      // Заполняем данные уведомления
+      document.getElementById('sender-name').textContent = data.title || data.sender || 'Отправитель';
+      document.getElementById('message-text').textContent = data.body || data.message;
+
+      // Устанавливаем аватар
+      const avatar = document.getElementById('avatar');
+      const chatType = data.chatType || 'private';
+      avatar.innerHTML = getAvatarSVG(chatType);
+
+      // Запускаем анимацию прогресс-бара
+      startProgressAnimation(data.duration);
+
+      // Автозакрытие
+      closeTimeout = setTimeout(closeNotification, data.duration);
+    });
+
+    function closeNotification() {
+      clearTimeout(closeTimeout);
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+
+      document.body.classList.add('fade-out');
+
+      setTimeout(() => {
+        if (currentId) ipcRenderer.invoke('close-notification', currentId);
+      }, 350);
+    }
+
+    function replyToMessage() {
+      if (currentId) {
+        ipcRenderer.invoke('notification-action', {
+          id: currentId,
+          action: 'reply'
+        });
+      }
+      closeNotification();
+    }
+
+    function markAsRead() {
+      if (currentId) {
+        ipcRenderer.invoke('notification-action', {
+          id: currentId,
+          action: 'mark_read'
+        });
+      }
+      closeNotification();
+    }
+
+    // Клик по уведомлению - открываем чат
+    document.body.addEventListener('click', (e) => {
+      // Игнорируем клики по кнопкам действий
+      if (e.target.classList.contains('action-btn') ||
+        e.target.classList.contains('close-btn')) {
+        return;
+      }
+
+      if (currentId) {
+        ipcRenderer.invoke('notification-clicked', currentId);
+      }
+      closeNotification();
+    });
+
+    // Загружаем сохранённую тему при загрузке
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedTheme = localStorage.getItem('notification-theme');
+      if (savedTheme === 'dark') {
+        isDarkTheme = true;
+        document.body.classList.add('dark-theme');
+      }
+    });
+  </script>
+
+</body>
+
+</html>

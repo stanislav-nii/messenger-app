@@ -1,28 +1,135 @@
-const {
-  app,
-  BrowserWindow,
-  Menu,
-  Tray,
-  Notification,
-  net,
-  pushNotifications,
-} = require("electron");
-
+//main.js
+const { app, BrowserWindow, Menu, Tray, Notification, net, shell } = require('electron');
+const fs = require('fs');
+const path = require('node:path');
+const crypto = require('crypto');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+const { download } = require('electron-dl');
+const registry = require('windows/lib/registry');
+const contextMenu = require('electron-context-menu');
+const { notificationManager } = require('./notification-manager');
 
-const path = require("node:path");
-const contextMenu = require("electron-context-menu");
-const { download } = require("electron-dl");
-const URL = "http://192.168.0.2:8000/"
+// --- Config ---
+const URL = 'http://192.168.0.2:8000/';
+const DOWNLOADS_PATH = registry(
+  'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders'
+)['{374DE290-123F-4565-9164-39C4925E467B}']?.value;
 
-app.setAppUserModelId("Messenger");
-
+app.setAppUserModelId('Messenger');
 log.transports.file.resolvePath = () => path.join(process.env.APPDATA, 'messenger/log/main.log');
-log.log("Application version" + app.getVersion());
+log.info('Application version ' + app.getVersion());
 
-var mainWindow;
+// --- Helpers ---
+function getChecksum(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const input = fs.createReadStream(filePath);
+    input.on('error', reject);
+    input.on('data', (chunk) => hash.update(chunk));
+    input.on('close', () => resolve(hash.digest('hex')));
+  });
+}
 
+async function httpGetJson(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = net.request({ url, useSessionCookies: true });
+      const chunks = [];
+      req.on('response', (res) => {
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(Buffer.concat(chunks));
+            resolve(data);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function showNotification({ title, body = 'Новое сообщение', onClick, silent = false, chatType } = {}) {
+  try {
+    // Заменяем стандартные уведомления на кастомные
+    notificationManager.showNotification({
+      title: title,
+      message: body,
+      type: 'info',
+      duration: 5000,
+      onClick: onClick,
+      playSound: !silent,
+      chatType: chatType
+    });
+  } catch (err) {
+    console.error('Notification error:', err);
+  }
+}
+
+function notifyEntity(data, mainWindow) {
+  if (!data?.name) return false;
+
+  // Определяем заголовок и тело уведомления
+  let title, body, url, chatType;
+
+  console.log(data);
+  if (data.threadtype === 'channel') {
+    // Для канала: заголовок - название канала, тело - от кого сообщение
+    title = data.threadname || data.name; // Используем threadname если есть
+    const senderInfo = data.sender ? `${data.sender}: ` : '';
+    const messageText = data.body || 'Новое сообщение';
+    // Обрезаем сообщение если слишком длинное
+    body = senderInfo + (messageText.length > 50 ? messageText.substring(0, 47) + '...' : messageText);
+    url = URL + `channels/${data.linker}`;
+    chatType = 'channel';
+  } else {
+    // Для личных сообщений: заголовок - имя отправителя, тело - текст сообщения
+    title = data.name || data.sender || 'Отправитель';
+    const messageText = data.body || 'Новое сообщение';
+    // Обрезаем сообщение если слишком длинное
+    body = messageText.length > 60 ? messageText.substring(0, 57) + '...' : messageText;
+    url = URL + `users/${data.linker}`;
+    chatType = 'private'; 
+  }
+
+  const containsThumbsUp = body.includes(':thumbs-up:');
+  const processedBody = body.replace(/:thumbs-up:/g, '👍');
+  console.log(body);
+  console.log(processedBody);
+
+  showNotification({
+    title,
+    body: processedBody,
+    onClick: () => {
+      mainWindow.loadURL(url);
+      mainWindow.show();
+    },
+    silent: containsThumbsUp,
+    chatType: chatType,
+  });
+  
+  !mainWindow.isVisible() && mainWindow.minimize();
+  return true;
+}
+
+function refreshBadgeCount(id) {
+ // console.log(id);
+  if (!id) return;
+  httpGetJson(`${URL}api/users/${id}/`)
+    .then((resp) => {
+    //  console.log(resp);
+      if (resp) app.setBadgeCount(Object.keys(resp.unread || {}).length);
+    })
+    .catch((e) => console.error('refreshBadgeCount', e));
+}
+
+// --- Context menu ---
 contextMenu({
   showSaveImageAs: true,
   showSelectAll: false,
@@ -30,43 +137,55 @@ contextMenu({
   showSearchWithGoogle: false,
 });
 
-async function notifyIfChannel(messageJSON, mainWindow){
+// --- Main window & logic ---
+let mainWindow;
+let ID = '';
+
+async function handleDownloadClick(url, originalName) {
+  const dir = DOWNLOADS_PATH || process.cwd();
+  const ext = path.extname(originalName) || '';
+  const baseName = originalName.replace(/\(\d+\)(?=\.[^.]*$|$)/, '').trim();
+  const nameWithoutExt = baseName.replace(ext, '');
+  const tempName = `temp_${Date.now()}${ext}`;
+  const tempPath = path.join(dir, tempName);
+
   try {
-    const path_ = URL + `api/channels/${
-      Object.keys(messageJSON.unread)[Object.keys(messageJSON.unread).length-1]
-    }/`;
-    const request = net.request({
-      url: path_,
-      useSessionCookies: true,
+    await download(BrowserWindow.getFocusedWindow(), url, { saveAs: false, filename: tempName, directory: dir });
+    const fileHash = await getChecksum(tempPath);
+
+    const dirFiles = fs.readdirSync(dir);
+    const duplicateFiles = dirFiles.filter((file) => {
+      const fileBase = file.replace(/\(\d+\)(?=\.[^.]*$|$)/, '').trim();
+      return fileBase === baseName || (file.startsWith(nameWithoutExt + ' (') && file.endsWith(ext));
     });
-    request.on("response", (response) => {
-      const data = [];
-      response.on("data", (chunk) => {
-        data.push(chunk);
-      });
-      response.on("end", () => {
-        try{
-        const resp = JSON.parse(Buffer.concat(data));
-        if(resp.name){
-          const notification = new Notification({
-            title: resp.name,
-            body: "Новое сообщение",
-          });
-          notification.addListener("click", (ev) => {
-            mainWindow.loadURL(URL + "channels/" + resp.linker);
-            mainWindow.show();
-          });
-          notification.show();
+
+    for (const file of duplicateFiles) {
+      try {
+        const checksum = await getChecksum(path.join(dir, file));
+        if (checksum === fileHash) {
+          fs.unlinkSync(tempPath);
+          shell.openPath(path.join(dir, file));
+          return;
         }
+      } catch (err) {
+        console.error('hash check failed for', file, err);
       }
-      catch(error) {
-        console.log(error);
-      }
-      });
-    });
-    request.end();
-  } catch (error) {
-    console.log(error);
+    }
+
+    let finalName = originalName;
+    let i = 1;
+    while (dirFiles.includes(finalName)) {
+      finalName = `${nameWithoutExt} (${i++})${ext}`;
+    }
+    fs.renameSync(tempPath, path.join(dir, finalName));
+    shell.openPath(path.join(dir, finalName));
+  } catch (err) {
+    console.error('handleDownloadClick error:', err);
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch (e) {
+      /* ignore */
+    }
   }
 }
 
@@ -75,277 +194,198 @@ async function createWindow() {
     width: 1050,
     height: 700,
     autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: true,
-    }
+    webPreferences: { nodeIntegration: true },
   });
+
   mainWindow.loadURL(URL);
+  mainWindow.webContents.reloadIgnoringCache();
+  mainWindow.webContents.on('did-fail-load', () => mainWindow.reload());
 
-  mainWindow.webContents.on("did-fail-load", (ev) => {
-    console.log('did-fail-load');
-    mainWindow.reload();
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(URL + 'download/')) {
+      BrowserWindow.getAllWindows()[0]
+        .webContents.executeJavaScript(`
+          (function(){
+            var name, message_id;
+            Array.from(document.getElementsByTagName('a')).forEach((element) => {
+              if(element.href === ${JSON.stringify(url)}){
+                name = element.textContent;
+                message_id = element.closest('figure.chat-message')?.getAttribute('data-id');
+              }
+            });
+            return [name?.toString() || '', message_id || ''];
+          })();
+        `)
+        .then(async ([originalName]) => {
+          if (!originalName) return;
+          await handleDownloadClick(url, originalName);
+        })
+        .catch((err) => console.error('Error executing JS for download:', err));
+
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
   });
 
-  mainWindow.webContents.setWindowOpenHandler(
-    ({ url, referrer, postBody, features, frameName }) => {
-      if (url.startsWith(URL + "download/")) {
-        BrowserWindow.getAllWindows()[0]
-          .webContents.executeJavaScript(
-            `
-      var name;
-      Array.from(document.getElementsByTagName("a")).forEach((element) => {
-        if(element.href === ${JSON.stringify(url)})
-          name = element.textContent;
-      });
-      name.toString();
-      `
-          )
-          .then((result) => {
-            download(BrowserWindow.getFocusedWindow(), url, {
-              saveAs: true,
-              filename: result,
-            });
-          });
-        return { action: "deny" };
+  const dbg = mainWindow.webContents.debugger;
+  let isRequestedUnread = false;
+  let isRequestedMessage = false;
+
+  try {
+    dbg.attach();
+  } catch (err) {
+    console.error('Debugger attach failed:', err);
+  }
+
+  dbg.on('message', async (_event, method, params) => {
+    if (method === 'Network.webSocketFrameError') return mainWindow.reload();
+
+    if (method === 'Network.webSocketFrameReceived' || method === 'Network.webSocketFrameSent') {
+      let messageJSON;
+      try {
+        messageJSON = JSON.parse(decodeURIComponent(params?.response?.payloadData));
+      } catch (err) {
+        return;
       }
-      return { action: "allow" };
-    }
-  );
 
-  const _debugger = mainWindow.webContents.debugger;
-  var isRequestedUnread = false;
-  var isRequestedMessage = false;
-  var unreadCollection = {};
-
-  _debugger.attach();
-  _debugger.on("message", async (_event, method, params) => {
-    if(method === "Network.webSocketFrameError"){
-      console.log(method);
-      mainWindow.reload();
-    }
-
-    if (method === "Network.webSocketFrameReceived") {
-      const messageJSON = JSON.parse(
-        decodeURIComponent(params?.response?.payloadData)
-      );
-      if(messageJSON.type === "read"){
-        setRead = `var list = document.querySelectorAll(".chat-unread");
-                   for(var item of list){
-                    item.classList.remove("chat-unread");
-                   }`;
-        mainWindow.webContents.executeJavaScript(setRead);
+      if (messageJSON?.type === 'online' && !ID) {
+        ID = messageJSON.id;
+        refreshBadgeCount(ID);
       }
-      if (messageJSON.type === "unread") {
-        app.setBadgeCount(Object.keys(messageJSON.unread).length);
-        if (!isRequestedUnread) {
-          try {
-            if(Object.keys(messageJSON.unread).length > Object.keys(unreadCollection).length){
-              for(const [key, value] of Object.entries(unreadCollection)){
-                delete messageJSON.unread[key];
-              }
-            }
-            else {
-              for(const [key, value] of Object.entries(unreadCollection)){
-                if(messageJSON.unread[key] <= value){
-                  delete messageJSON.unread[key];
-                }
-              }
-            }
-            const path_ = URL + `api/users/${
-              Object.keys(messageJSON.unread)[Object.keys(messageJSON.unread).length-1]
-            }/`;
-            const request = net.request({
-              url: path_,
-              useSessionCookies: true,
-            });
-            request.on("response", (response) => {
-              const data = [];
-              response.on("data", (chunk) => {
-                data.push(chunk);
-              });
-              response.on("end", () => {
-                const resp = JSON.parse(Buffer.concat(data));
-                if(resp.name){
-                  const notification = new Notification({
-                    title: resp.name,
-                    body: "Новое сообщение",
-                  });
-                  notification.addListener("click", (ev) => {
-                    mainWindow.loadURL(URL + "users/" + resp.linker);
-                    mainWindow.show();
-                  });
-                  notification.show();
-                }
-                else {
-                  notifyIfChannel(messageJSON, mainWindow);
-                }
-              });
-            });
-            request.end();
-          } catch (error) {
-            console.log(error);
-          }
+
+      if (method === 'Network.webSocketFrameReceived') {
+        if (messageJSON.type === 'read') {
+          mainWindow.webContents.executeJavaScript(`
+            Array.from(document.querySelectorAll('.chat-unread')).forEach(item => item.classList.remove('chat-unread'));
+          `);
         }
-        isRequestedUnread = false;
-        unreadCollection = messageJSON.unread;
-      } else if (messageJSON.type === "message") {
-        if (!isRequestedMessage) {
-          const path_ = URL + `api/users/${messageJSON.iduser}/`;
-          try {
-            const request = net.request({
-              url: path_,
-              useSessionCookies: true,
-            });
-            request.on("response", (response) => {
-              const data = [];
-              response.on("data", (chunk) => {
-                data.push(chunk);
-              });
-              response.on("end", () => {
-                const resp = JSON.parse(Buffer.concat(data));
-                const notification = new Notification({
-                  title: resp.name,
-                  body: "Новое сообщение",
-                });
-                notification.addListener("click", (ev) => {
-                  mainWindow.show();
-                });
-                notification.show();
-              });
-            });
-            request.end();
-          } catch (er) {
-            console.log(error);
+
+        if (messageJSON.type === 'unread') {
+          refreshBadgeCount(ID);
+          if (!isRequestedUnread) {
+            const keys = Object.keys(messageJSON.unread || {});
+          //  console.log(messageJSON);
+            const last = keys[keys.length - 1];
+            if (last) {
+              // Используем данные из messageJSON вместо fetch
+              const entityData = {
+                name: messageJSON.sender,
+                threadname: messageJSON.threadname,
+                linker: messageJSON.linker,
+                threadtype: messageJSON.threadtype,
+                body: messageJSON.body,
+                sender: messageJSON.sender
+              };
+              notifyEntity(entityData, mainWindow);
+            }
           }
+          isRequestedUnread = false;
         }
-        isRequestedMessage = false;
+
+        if (messageJSON.type === 'message') {
+          console.log("if (messageJSON.type === 'message') {");
+          if (!isRequestedMessage) {
+            console.log("if (!isRequestedMessage) {");
+
+            // Для message типа также используем данные из websocket
+            const entityData = {
+              name: messageJSON.sender,
+              threadname: messageJSON.threadname,
+              linker: messageJSON.linker,
+              threadtype: messageJSON.threadtype,
+              body: messageJSON.body,
+              sender: messageJSON.sender
+            };
+            
+            notifyEntity(entityData, mainWindow);
+          }
+          isRequestedMessage = false;
+        }
+      }
+
+      if (method === 'Network.webSocketFrameSent') {
+        if (messageJSON.type === 'unread') isRequestedUnread = true;
+        else if (messageJSON.type === 'message' || messageJSON.type === 'forward') isRequestedMessage = true;
+        else if (messageJSON.type === 'user' || messageJSON.type === 'channel') refreshBadgeCount(ID);
       }
     }
 
-    if (method === "Network.webSocketFrameSent") {
-      const messageJSON = JSON.parse(
-        decodeURIComponent(params?.response?.payloadData)
-      );
-      if (messageJSON.type === "unread") {
-        isRequestedUnread = true;
-      }
-      else if (messageJSON.type === "message") {
-        isRequestedMessage = true;
-      }
-      else if (messageJSON.type === "user" || messageJSON.type === "channel"){
-        delete unreadCollection[messageJSON.id];
-        app.setBadgeCount(Object.keys(unreadCollection).length);
-      }
-    }
-
-    if (method === "Target.attachedToTarget") {
-      // capture iframe websocket request
-      if (params.targetInfo.type === "iframe") {
-        await _debugger.sendCommand("Network.enable", null, params.sessionId);
-        await _debugger.sendCommand("Runtime.enable", null, params.sessionId);
-        await _debugger.sendCommand(
-          "Runtime.runIfWaitingForDebugger",
-          null,
-          params.sessionId
-        );
+    if (method === 'Target.attachedToTarget' && params.targetInfo?.type === 'iframe') {
+      try {
+        await dbg.sendCommand('Network.enable', null, params.sessionId);
+        await dbg.sendCommand('Runtime.enable', null, params.sessionId);
+        await dbg.sendCommand('Runtime.runIfWaitingForDebugger', null, params.sessionId);
+      } catch (err) {
+        console.error('Error auto-attaching to iframe debugger:', err);
       }
     }
   });
 
-  mainWindow.on("close", (ev) => {
+  mainWindow.on('close', (ev) => {
     if (mainWindow?.isVisible()) {
       ev.preventDefault();
       mainWindow.hide();
     }
   });
 
-  app.on("quit", () => {
-    _debugger.detach();
+  mainWindow.on('show', () => refreshBadgeCount(ID));
+  app.on('quit', () => {
+    try {
+      dbg.detach();
+    } catch (e) {}
   });
 
-  await _debugger.sendCommand("Network.enable");
-  await _debugger.sendCommand("Target.setAutoAttach", {
-    autoAttach: true,
-    waitForDebuggerOnStart: true,
-    flatten: true,
-  });
+  await dbg.sendCommand('Network.enable');
+  await dbg.sendCommand('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
 }
 
 function createTray() {
-  const contextMenu = Menu.buildFromTemplate([
+  const template = [
+    { label: 'Открыть', click: () => BrowserWindow.getAllWindows().shift().show() },
+    { type: 'separator' },
     {
-      label: "Открыть",
-      click: () => {
-        BrowserWindow.getAllWindows().shift().show();
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Выйти",
-      accelerator: "CmdOrCtrl+Q",
+      label: 'Выйти',
+      accelerator: 'CmdOrCtrl+Q',
       click: () => {
         BrowserWindow.getAllWindows().forEach((w) => w.destroy());
         app.quit();
       },
     },
-  ]);
-  const imgPath = path.join(process.resourcesPath, "icon.png");
+  ];
+  const imgPath = path.join(process.resourcesPath, 'icon.png');
   const tray = new Tray(imgPath);
-  tray.setToolTip("Messenger");
-  tray.setContextMenu(contextMenu);
-  tray.on("click", () => {
-    BrowserWindow.getAllWindows().shift().show();
-  });
+  tray.setToolTip('Messenger');
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+  tray.on('click', () => BrowserWindow.getAllWindows().shift().show());
 }
 
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  app.quit()
+  app.quit();
 } else {
-  app.on('second-instance', (event, commandLine, workingDirectory) => {
-    // Someone tried to run a second instance, we should focus our window.
-    if (mainWindow) {
-      mainWindow.show();
-      //mainWindow.focus()
-    }
+  app.on('second-instance', () => {
+    if (mainWindow) mainWindow.show();
   });
+
   app.whenReady().then(() => {
     createWindow();
     createTray();
     autoUpdater.checkForUpdates();
-    setInterval(() => {
-      autoUpdater.checkForUpdates();
-    }, 1000 * 60 * 10);
+    setInterval(() => autoUpdater.checkForUpdates(), 1000 * 60 * 10);
   });
 }
 
-autoUpdater.on("update-available", ()=>{
-  log.info("update-available");
-});
-
-autoUpdater.on("checking-for-update", ()=>{
-  log.info("checking-for-update");
-});
-
-autoUpdater.on("download-progress", ()=>{
-  log.info("download-progress");
-});
-
-autoUpdater.on("update-downloaded", ()=>{
-  log.info("update-downloaded");
+// autoUpdater logging (kept automatic install)
+autoUpdater.on('update-available', () => log.info('update-available'));
+autoUpdater.on('checking-for-update', () => log.info('checking-for-update'));
+autoUpdater.on('download-progress', (p) => log.info('download-progress', p));
+autoUpdater.on('update-downloaded', () => {
+  log.info('update-downloaded');
   autoUpdater.quitAndInstall(true, true);
-})
-
-autoUpdater.on("download-progress", (progressTrack)=>{
-  log.info("\n\ndownload-progress");
-  log.info(progressTrack);
 });
 
-app.on("activate", () => {
+app.on('activate', () => {
   const window = BrowserWindow.getAllWindows().shift();
-  if (window) {
-    window.show();
-  } else {
-    createWindow();
-  }
+  if (window) window.show();
+  else createWindow();
 });
